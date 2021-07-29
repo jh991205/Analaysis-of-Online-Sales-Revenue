@@ -1,0 +1,319 @@
+---
+title: "4740 Project"
+author: "Lu Cao"
+date: "5/10/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. Package and Data file
+```{r}
+#Import Library
+library("dplyr")
+library(ggcorrplot)
+
+#Import the data file
+setwd("/Users/outgoingcharlene/Desktop/")
+Online <- read.csv("online_shoppers_intention.csv")
+```
+
+2. Data Cleaning
+```{r}
+summary(Online) #Summary of the original Data set Online
+head(Online)
+
+# Convert True to 1, False to 0 in Revenue and Weekend
+Online$Revenue <- as.integer(Online$Revenue)
+Online$Weekend  <- as.integer(Online$Weekend)
+
+# Convert Month to integers 1:12
+Online$Month[Online$Month == "June"] <- "Jun"
+Online$Month <- match(Online$Month, month.abb)
+
+# Convert VisitorType to Categorical: 
+#    "Other" ==> 0; "New_Visitor" ==> 1; "Returning_Visitor" ==> 2 
+Online$VisitorType[Online$VisitorType == "Other"] <- 1
+Online$VisitorType[Online$VisitorType == "New_Visitor"] <- 2
+Online$VisitorType[Online$VisitorType == "Returning_Visitor"] <- 3
+Online$VisitorType <- as.numeric(Online$VisitorType)
+
+summary(Online) #Summary of the Updated data set
+```
+
+3. Visualization
+```{r}
+#Plot the pairs function 
+#pairs(Online, cex = 0.1)
+
+#Create a correlation matrix and plot it
+correlations <- cor(as.matrix(Online))
+correlations <- as.data.frame(correlations)
+correlations
+
+
+
+# Filter out only 0.5<= cor <1
+correlations[correlations < 0.5 | correlations ==1] <- "" 
+correlations
+
+names(Online)
+table(Online$Revenue) #Too many 0
+
+hist(Online$PageValues, main = "Histogram of log(PageValues)") # Log
+#Based on the histogram, We will take either log of PageValues or normalization 
+# Log
+hist(log(Online$PageValues), main = "Histogram of log(PageValues)") 
+
+#Normalized
+hist(scale(Online$PageValues), main = "Histogram of normalized PageValues")
+
+# Visualize the distribution of 
+# "Administrative", "Administrative Duration", "Informational", 
+# "Informational Duration", "Product Related" and "Product Related Duration" 
+par(mfrow = c(3,3))
+hist(Online$Administrative, breaks = 100, main = "Histogram of Administrative", xlab ="Administrative")
+hist(Online$Administrative_Duration, breaks = 100, 
+     main = "Histogram of \n Administrative duration", xlab ="Administrative duration")
+hist(Online$Administrative_Duration/Online$Administrative, breaks = 100,  
+     main = "Histogram of \n Administrative/Duration", xlab ="Administrative/Duration")
+hist(Online$Informational, breaks = 100, main = "Histogram of Informational", xlab ="")
+hist(Online$Informational_Duration, breaks = 100, 
+     main = "Histogram of \n Informational Duration", xlab ="Informational Duration")
+hist(Online$Informational_Duration/Online$Informational, breaks = 100, 
+     main = "Histogram of \n Informational/Duration", xlab ="Informational/Duration")
+hist(Online$ProductRelated, breaks = 100, 
+     main = "Histogram of ProductRelated", xlab ="ProductRelated")
+hist(Online$ProductRelated_Duration, breaks = 100,
+     main = "Histogram of \n ProductRelated Duration", xlab ="ProductRelated Duration")
+hist(Online$ProductRelated_Duration/Online$ProductRelated, breaks = 100,  
+     main = "Histogram of \n ProductRelated/Duration", xlab ="ProductRelated/Duration")
+
+par(mfrow = c(1,2))
+hist(Online$ExitRates, breaks = 100, main = "Histogram of Exit Rates", xlab ="Exit Rates")
+hist(Online$BounceRates, breaks = 100, main = "Histogram of Bounce Rates", xlab ="Bounce Rates")
+```
+
+Most people spend the most time on Product Related pages. 
+
+Since the correlation between BounceRates and ExitRates is 0.91, which is very close to 1, we can choose one of them in the following models. According to the comparison between the distribution of Exit Rates and Bounce Rates, we will keep Exit Rates. 
+
+```{r}
+# 1 - Exit Rate => Keep Rate => scale to 0~1
+Online$KeepScore <- scale( 1 - Online$ExitRates, center = F)
+hist(Online$KeepScore, main = "Histogram of KeepScore", xlab = "KeepScore")
+```
+We can Predict Keep Scale to rate the quality of the online page.
+
+
+
+#Model 1 Logistic Regression#
+
+#Description of the Method#
+Logistic regression is another method to find relationship between qualitative response and predictors. It belongs to the class of generalized linear model and is used to predict categorical target variables. This is achieved through a logistic function which takes values between 0 and 1. 
+
+#Build the Model#
+To decide which variables are significant in predicting the response "Revenue", we firstly build a model with full data set.
+
+```{r}
+#Building Logistic Regression Model#
+glm.fit=glm(Revenue~.,family="binomial",data=Online)
+
+#Summary table#
+summary(glm.fit)
+```
+
+#Interpretation of the Model/summary()#
+
+summary() returns the estimate, z-statistics and p-values on each of the coefficients. Of all the predictors, ProductRelated, ProductRelated_Duration, ExitRates, PageValuesSpecialDay, Month, VisitorType and Weekend are statistically significant as their p-values are less than 0.05.Among them, ExitRates, PageValues and Month associate with the lowest p-values, indicating they have relatively strong relationships with the response.
+
+#Build a More Interpretable Model#
+
+In order to make the model easier and more interpretable, we drop the insignificant variables and build a new reduced model which only contains the significant predictors yielded from the previous part. From the summary of this new model, we can conclude that each of the variables are predictive thus useful.
+
+```{r}
+#reduced model#
+glm.fit1=glm.fit=glm(Revenue~ProductRelated+ProductRelated_Duration+ExitRates+PageValues+SpecialDay+Month+VisitorType   +Weekend,family="binomial",data=Online)
+
+summary(glm.fit1)
+```
+
+#Assessment of the Model_Accuracy#
+
+#1.Test Error#
+To measure the performance of our model, we divide our data set into training data and test data in case the consequence of over-fitting, which might happen if same data set is used for both training and testing. Here we equally split the data into two categories with n/2 observations contained in each. Then, we form the logistic regression function using only training data and assess its accuracy based on test data.
+
+```{r}
+#training data and test data#
+n=nrow(Online)
+train=sample(1:n,n/2,replace=F)
+traindata=Online[train,]
+testdata=Online[-train,]
+
+#build model with training data#
+glm.fits=glm.fit=glm(Revenue~ProductRelated+ProductRelated_Duration+ExitRates+PageValues+SpecialDay+Month+VisitorType   +Weekend,family="binomial",data=traindata)
+
+summary(glm.fits)
+
+#obtain the predicted probabilities that revenue=1,given the values of predictor, using test data#
+glm.probs=predict(glm.fits,testdata$Revenue,type="response")
+```
+
+
+```{r}
+#confusion matrix#
+glm.pred=rep(0,length(train))
+glm.pred[glm.probs>.5]=1
+table(glm.pred,testdata$Revenue)
+mean(glm.pred==testdata$Revenue)
+```
+
+By computing the predictions of test data and comparing them to the actual observations, we may conclude that the percentage of correct predictions on the test data is (5110+343)/6165, equal to 88.5%. In other words, the test error is 11.5%. Apart from this overall accuracy, we can also get the followings:
+
+True Positive Rate (TPR)=343/(343+131)=72.3%, indicating 72.3% positive values, out of all the positive values, have been correctly predicted.
+
+False Positive Rate (FPR)= 131/(131+5110)=2.5%,indicating 2.5% negative values, out of all the negative values, have been incorrectly predicted.
+
+True Negative Rate (TNR)=5110/(5110 +581)=89.8% ,indicating 89.8% negative values, out of all the negative values, have been correctly predicted.
+
+False Negative Rate (FNR)=343/(343+581)=37.1%,indicating positive values, out of all the positive values, have been incorrectly predicted.
+
+#2.AIC#
+As for other criteria, we use AIC and BIC, which both follow the rule: Smaller the better.
+```{r}
+AIC(glm.fits)
+```
+#3.AIC#
+```{r}
+BIC(glm.fits)
+```
+
+#Conclusion#
+
+#Model 2 Random Forest#
+```{r}
+set.seed(1)
+train = sample(1:nrow(Online),nrow(Online)/2)
+online.train = Online[train,]
+online.test = Online[-train,]
+rev.test<-Online$Revenue[-train]
+rev.train<-Online$Revenue[train]
+```
+
+```{r}
+library(randomForest)
+set.seed(1)
+rf=randomForest(factor(Revenue) ~., data=online.train,importance=TRUE,type="classification")
+rf
+```
+
+
+```{r}
+importance(rf)
+varImpPlot(rf)
+```
+
+
+```{r}
+plot(rf)
+```
+
+```{r}
+set.seed(1)
+pred = predict(rf, newdata=online.test[-18])
+cm = table(online.test[,18], pred)
+cm
+```
+
+test error:(overall)
+```{r}
+(368+211)/(5019+211+368+567)
+```
+
+false positive:
+```{r}
+(368)/(368+567)
+```
+false negative:
+```{r}
+(211)/(211+5019)
+```
+
+```{r}
+accuracy = (sum(diag(cm)))/sum(cm)
+accuracy
+```
+
+
+```{r}
+plot(margin(rf, online.test[,18]))
+```
+
+#Model 3 Classification#
+Starting from LDA
+```{r}
+fit.lda<-lda(Revenue~.,data = Online, subset = train)
+fit.lda
+pred.lda<-predict(fit.lda, newdata = online.test)
+te.lda<-mean(pred.lda$class != rev.test)
+```
+Therefore, the test error is 0.1185726
+
+Perform QDA
+```{r}
+fit.qda <- qda(Revenue~.,data = Online, subset = train)
+pred.qda<-predict(fit.qda, newdata = online.test)
+te.qda<-mean(pred.qda$class != rev.test)
+te.qda
+```
+Therefore, the test error is 0.1667478
+
+Perform KNN
+```{r}
+library(class)
+train.k<-Online[,-18][train,]
+test.k<-Online[,-18][-train,]
+
+error.knn = c()
+for (i in 1:100){
+  predict.knn <- knn(train.k, test.k, rev.train, k = i)
+  error.knn[i] = mean(predict.knn != rev.test)
+  }
+which.min(error.knn)
+```
+This shows that k=13 gives the best performance.
+```{r}
+error.knn[13]
+```
+The least test error rate is 0.1344688.
+
+Comparing the three method, the LDA method gives the most accurate result with the least test error.
+Apart from this overall accuracy, we can also get the followings for LDA:
+```{r}
+table(pred.lda$class,rev.test)
+```
+True Positive Rate (TPR)=TP/(TP+FN):
+```{r}
+5138/(5138+640)
+```
+This indicates 88.92% positive values, out of all the positive values, have been correctly predicted.
+
+False Positive Rate (FPR)= FP/(FP+TN):
+```{r}
+91/(91+296)
+```
+This indicates 23.51% negative values, out of all the negative values, have been incorrectly predicted.
+
+True Negative Rate (TNR)=TN/(TN+FP):
+```{r}
+296/(91+296)
+```
+This indicates 76.86% negative values, out of all the negative values, have been incorrectly predicted.
+
+False Negative Rate (FNR)=FN/(FN+TP):
+```{r}
+640/(640+5138)
+```
+This indicates 11.08% positive values, out of all the positive values, have been incorrectly predicted.
